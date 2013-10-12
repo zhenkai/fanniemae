@@ -10,12 +10,8 @@ optional arguments:
 
   -h, --help            show this help message and exit
 
-  -f FROM_YEAR, --from-year FROM_YEAR
+  -f FROM_YEAR, --from-year FROM_YEAR from year
 
-                        from year
-
-  -t TO_YEAR, --to-year TO_YEAR
-
-                        to year
+  -t TO_YEAR, --to-year TO_YEAR to year
 
   -p, --progress        show progress bar
