@@ -10,7 +10,7 @@ LOGIN_URL = 'https://loanperformancedata.fanniemae.com/lppub/loginForm.html'
 #DOWNLOAD_URL = 'https://loanperformancedata.fanniemae.com/lppub-docs/publish/%s_%sQ%s.txt.gz'
 DOWNLOADS_URL= 'https://loanperformancedata.fanniemae.com/lppub/getMonthlyDownloadJson.json?_=%s&_search=false&nd=%s&rows=20&page=1&sidx=&sord=asc'
 # input your proxy url, something like 'http://username:password@webproxy.bankofamerica.com:8080'
-PROXY_URL=''
+PROXY_URL='http://122.227.164.124:8118'
 START_YEAR = 1900
 END_YEAR = 2100
 
@@ -60,6 +60,14 @@ class NoopProgressBar(object):
   def __exit__(self, type, value, traceback):
     pass
 
+
+# this adds fake user agent to request header in attempt to
+# avoid '104 connection reset by peer' error, which is perhaps due to boa's proxy
+def getRequestWithUserAgent(url):
+  req = urllib2.Request(url)
+  req.add_header('User-Agent', 'Mozilla/5.0')
+  return req
+
 class FannieMaeLoanData(object):
   ''' A hack to download Fannie Mae loan data'''
 
@@ -85,10 +93,11 @@ class FannieMaeLoanData(object):
   def __exit__(self, type, value, traceback):
     logging.info('All downloads finished. Bye bye bye...')
 
+
   def download(self, url, show_progress):
     filename = url.split('/')[-1]
     try:
-      r = self.opener.open(url)
+      r = self.opener.open(getRequestWithUserAgent(url))
       content_length = int(r.headers.get('content-length'))
       logging.info('Downloading %s (%0.2f MB) to %s' % (filename, content_length / (1024.0 * 1024.0), self.dir))
 
@@ -127,7 +136,7 @@ class FannieMaeLoanData(object):
 
   def list_downloads(self, url):
     try:
-      r = self.opener.open(url)
+      r = self.opener.open(getRequestWithUserAgent(url))
       json_response = json.loads(r.read())
     except urllib2.URLError as e:
       logging.error('Cannot list downloads: %s', e.code)
