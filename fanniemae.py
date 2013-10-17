@@ -1,4 +1,5 @@
-from requests import session, codes
+from requests import session, codes, adapters
+from requests.packages.urllib3.poolmanager import PoolManager
 from gzip import open as gopen
 from argparse import ArgumentParser
 from os import path
@@ -15,11 +16,19 @@ PAYLOAD = {
   '_agreement': 'on'
 }
 PROXIES = {
-  'https': 'https://host:port/'
+  'https': 'https://62.253.249.150:8080/'
 }
 START_YEAR = 1900
 END_YEAR = 2100
 
+class SSLAdapter(adapters.HTTPAdapter):
+  def __init__(self, ssl_version=None, **kwargs):
+    # possible value: 'SSLv2', 'SSLv3', 'SSLv23', 'TLSv1'
+    self.ssl_version = ssl_version
+    super(SSLAdapter, self).__init__(**kwargs)
+
+  def init_poolmanager(self, connections, maxsize, block=False):
+    self.poolmanager = PoolManager(num_pools=connections, maxsize=maxsize, block=block, ssl_version=self.ssl_version)
 
 class ProgressBar(object):
   ''' A hack to show download progress '''
@@ -70,13 +79,14 @@ class NoopProgressBar(object):
 class FannieMaeLoanData(object):
   ''' A hack to download Fannie Mae loan data'''
 
-  def __init__(self, directory, no_proxy, login_url=LOGIN_URL, payload=PAYLOAD):
+  def __init__(self, directory, no_proxy, ssl_version = 'TLSv1', login_url=LOGIN_URL, payload=PAYLOAD):
     self.login_url = login_url
     self.payload = payload
     self.dir = directory
     self.s = session()
     if not no_proxy:
       self.s.proxies = PROXIES
+      self.s.mount('https://', SSLAdapter(ssl_version))
 
   def __enter__(self):
     logging.info('Login...')
@@ -168,6 +178,7 @@ if __name__ == '__main__':
   parser.add_argument('-t', '--to-year', help='to year', type=int, default=END_YEAR)
   parser.add_argument('-p', '--progress', help='show progress bar', action='store_true', default=False)
   parser.add_argument('-n', '--no-proxy', help='do not use proxy', action='store_true', default=False)
+  parser.add_argument('-s', '--ssl-version', help='ssl version to use', type=str, default='TLSv1')
   args = parser.parse_args()
 
   logging.basicConfig(format='>>> [%(asctime)s] [%(levelname)s] %(message)s', level=logging.INFO)
@@ -176,6 +187,6 @@ if __name__ == '__main__':
     logging.error('%s is not a directory!' % args.dir)
     exit(1)
 
-  with FannieMaeLoanData(args.dir, args.no_proxy) as fm:
+  with FannieMaeLoanData(args.dir, args.no_proxy, ssl_version=args.ssl_version) as fm:
     millis = int(round(time() * 1000))
     fm.download_all(DOWNLOADS_URL % (millis, millis), args.from_year, args.to_year, args.progress)
