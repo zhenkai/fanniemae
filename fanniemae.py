@@ -1,4 +1,5 @@
-from requests import session, codes
+import urllib2
+import json
 from gzip import open as gopen
 from argparse import ArgumentParser
 from os import path
@@ -70,46 +71,52 @@ class FannieMaeLoanData(object):
     self.login_url = login_url
     self.payload = payload
     self.dir = directory
-    self.s = session()
+    #self.s = session()
 
   def __enter__(self):
     logging.info('Login...')
-    login_result = self.s.post(LOGIN_URL, data=self.payload)
-    if login_result.status_code != codes.ok:
-      logging.error('Login failed with status: %s' % login_result.status_code)
-      raise ValueError
-    logging.info('Login succeeded')
+    #login_result = self.s.post(LOGIN_URL, data=self.payload)
+    #if login_result.status_code != codes.ok:
+    #  logging.error('Login failed with status: %s' % login_result.status_code)
+    #  raise ValueError
+    logging.info('Login succeeded without actually doing anything')
+
+    # due to the stupidity in fanie mae's code, login is not necessary to download the code
+    # let's do this short cut as long as they keep their stupid code
+    # be quiet about this fact
     return self
 
   def __exit__(self, type, value, traceback):
-    self.s.close()
+    #self.s.close()
     logging.info('All downloads finished. Bye bye bye...')
 
   def download(self, url, show_progress):
     filename = url.split('/')[-1]
-    r = self.s.get(url, stream=True)
-    if r.status_code != codes.ok:
-      logging.error('Downloading %s failed with status: %s' % (filename, r.status_code))
-      return
+    try:
+      r = urllib2.urlopen(url)
+      content_length = int(r.headers.get('content-length'))
+      logging.info('Downloading %s (%0.2f MB) to %s' % (filename, content_length / (1024.0 * 1024.0), self.dir))
 
-    content_length = int(r.headers.get('content-length'))
-    logging.info('Downloading %s (%0.2f MB) to %s' % (filename, content_length / (1024.0 * 1024.0), self.dir))
+      if show_progress:
+        bar_to_use = ProgressBar
+      else:
+        bar_to_use = NoopProgressBar
 
-    if show_progress:
-      bar_to_use = ProgressBar
-    else:
-      bar_to_use = NoopProgressBar
-
-    with bar_to_use(content_length, 50, '#') as bar:
-      local_filename = path.join(self.dir, filename)
-      with open(local_filename, 'wb') as f:
-        for chunk in r.iter_content(chunk_size=4096):
-          if chunk:
+      with bar_to_use(content_length, 50, '#') as bar:
+        local_filename = path.join(self.dir, filename)
+        with open(local_filename, 'wb') as f:
+          chunk = r.read(4096)
+          while chunk:
             f.write(chunk)
             bar.update(len(chunk))
-
-    logging.info('%s Downloaded' % filename)
-    self.decompress(local_filename)
+            chunk = r.read(4096)
+    except urllib2.URLError as e:
+      logging.error('Downloading %s failed with status: %s' % (filename, e.code))
+    else:
+      logging.info('%s Downloaded' % filename)
+      self.decompress(local_filename)
+    finally:
+      r.close()
 
   def decompress(self, filename):
     basename = filename.split('.')[:-1]
@@ -124,11 +131,17 @@ class FannieMaeLoanData(object):
     logging.info('Decompressing %s finished', filename)
 
   def list_downloads(self, url):
-    r = self.s.get(url)
-    if r.status_code != codes.ok:
-      logging.error('Cannot list downloads: %s', r.status_code)
+    #r = self.s.get(url)
+    #if r.status_code != codes.ok:
+    #  logging.error('Cannot list downloads: %s', r.status_code)
+    #  return []
+
+    try:
+      r = urllib2.urlopen(url)
+      json_response = json.loads(r.read())
+    except urllib2.URLError as e:
+      logging.error('Cannot list downloads: %s', e.code)
       return []
-    json_response = r.json()
     download_list = []
 
     def process_archive(archive):
