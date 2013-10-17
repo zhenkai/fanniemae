@@ -61,11 +61,11 @@ class NoopProgressBar(object):
     pass
 
 
-# this adds fake user agent to request header in attempt to
-# avoid '104 connection reset by peer' error, which is perhaps due to boa's proxy
-def getRequestWithUserAgent(url):
+# an attempt to solve the 104 error in boa's network
+def getRequestWithHeaders(url):
   req = urllib2.Request(url)
   req.add_header('User-Agent', 'Mozilla/5.0')
+  req.add_header('Connection', 'keep-alive')
   return req
 
 class FannieMaeLoanData(object):
@@ -97,7 +97,7 @@ class FannieMaeLoanData(object):
   def download(self, url, show_progress):
     filename = url.split('/')[-1]
     try:
-      r = self.opener.open(getRequestWithUserAgent(url))
+      r = self.opener.open(getRequestWithHeaders(url))
       content_length = int(r.headers.get('content-length'))
       logging.info('Downloading %s (%0.2f MB) to %s' % (filename, content_length / (1024.0 * 1024.0), self.dir))
 
@@ -136,7 +136,7 @@ class FannieMaeLoanData(object):
 
   def list_downloads(self, url):
     try:
-      r = self.opener.open(getRequestWithUserAgent(url))
+      r = self.opener.open(getRequestWithHeaders(url))
       json_response = json.loads(r.read())
     except urllib2.URLError as e:
       logging.error('Cannot list downloads: %s', e.code)
