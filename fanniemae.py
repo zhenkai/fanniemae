@@ -1,20 +1,16 @@
-import urllib2
-import json
 from gzip import open as gopen
 from argparse import ArgumentParser
 from os import path
 from time import time, strftime
+import urllib2
+import json
 import logging
 
 LOGIN_URL = 'https://loanperformancedata.fanniemae.com/lppub/loginForm.html'
 #DOWNLOAD_URL = 'https://loanperformancedata.fanniemae.com/lppub-docs/publish/%s_%sQ%s.txt.gz'
 DOWNLOADS_URL= 'https://loanperformancedata.fanniemae.com/lppub/getMonthlyDownloadJson.json?_=%s&_search=false&nd=%s&rows=20&page=1&sidx=&sord=asc'
-PAYLOAD = {
-  'username': '',
-  'password': '',
-  'agreement': 'true',
-  '_agreement': 'on'
-}
+# input your proxy url, something like 'http://username:password@webproxy.bankofamerica.com:8080'
+PROXY_URL=''
 START_YEAR = 1900
 END_YEAR = 2100
 
@@ -67,33 +63,32 @@ class NoopProgressBar(object):
 class FannieMaeLoanData(object):
   ''' A hack to download Fannie Mae loan data'''
 
-  def __init__(self, directory, login_url=LOGIN_URL, payload=PAYLOAD):
+  def __init__(self, directory, login_url=LOGIN_URL, proxy_url=PROXY_URL):
     self.login_url = login_url
-    self.payload = payload
     self.dir = directory
-    #self.s = session()
+    self.opener = urllib2.build_opener(
+                    urllib2.HTTPHandler(),
+                    urllib2.HTTPSHandler(),
+                    urllib2.ProxyHandler({'https': proxy_url}))
 
   def __enter__(self):
     logging.info('Login...')
-    #login_result = self.s.post(LOGIN_URL, data=self.payload)
-    #if login_result.status_code != codes.ok:
-    #  logging.error('Login failed with status: %s' % login_result.status_code)
-    #  raise ValueError
     logging.info('Login succeeded without actually doing anything')
 
-    # due to the stupidity in fanie mae's code, login is not necessary to download the code
+    # due to the stupidity in fanie mae's code
+    # (their javascript shows that they're not really checking username and password at all)
+    # login is not necessary to download the code
     # let's do this short cut as long as they keep their stupid code
     # be quiet about this fact
     return self
 
   def __exit__(self, type, value, traceback):
-    #self.s.close()
     logging.info('All downloads finished. Bye bye bye...')
 
   def download(self, url, show_progress):
     filename = url.split('/')[-1]
     try:
-      r = urllib2.urlopen(url)
+      r = self.opener.open(url)
       content_length = int(r.headers.get('content-length'))
       logging.info('Downloading %s (%0.2f MB) to %s' % (filename, content_length / (1024.0 * 1024.0), self.dir))
 
@@ -131,13 +126,8 @@ class FannieMaeLoanData(object):
     logging.info('Decompressing %s finished', filename)
 
   def list_downloads(self, url):
-    #r = self.s.get(url)
-    #if r.status_code != codes.ok:
-    #  logging.error('Cannot list downloads: %s', r.status_code)
-    #  return []
-
     try:
-      r = urllib2.urlopen(url)
+      r = self.opener.open(url)
       json_response = json.loads(r.read())
     except urllib2.URLError as e:
       logging.error('Cannot list downloads: %s', e.code)
