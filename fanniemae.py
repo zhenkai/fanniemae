@@ -1,7 +1,7 @@
 from argparse import ArgumentParser
 from tempfile import NamedTemporaryFile
 from os import path, unlink
-from time import time, strftime
+from time import time, strftime, sleep
 import shutil
 import urllib2
 import json
@@ -76,6 +76,7 @@ class FannieMaeLoanData(object):
   def __init__(self, directory, login_url=LOGIN_URL, proxy_url=PROXY_URL):
     self.login_url = login_url
     self.dir = directory
+    self.download_list = []
     if proxy_url is None:
       self.opener = urllib2.build_opener()
     else:
@@ -84,7 +85,7 @@ class FannieMaeLoanData(object):
                       urllib2.HTTPSHandler(),
                       urllib2.ProxyHandler({'https': proxy_url}))
 
-  def __enter__(self):
+  def login(self):
     logging.info('Login...')
     logging.info('Login succeeded without actually doing anything')
 
@@ -93,7 +94,6 @@ class FannieMaeLoanData(object):
     # login is not necessary to download the code
     # let's do this short cut as long as they keep their stupid code
     # be quiet about this fact
-    return self
 
   def __exit__(self, type, value, traceback):
     pass
@@ -102,6 +102,11 @@ class FannieMaeLoanData(object):
   def download(self, url, show_progress):
     gz_filename = url.split('/')[-1]
     filename = '.'.join(gz_filename.split('.')[:-1])
+    local_filename = path.join(self.dir, filename)
+    if path.exists(local_filename):
+      logging.info('%s already exists. Skip downloading.', local_filename)
+      return
+
     try:
       r = None
       r = self.opener.open(getRequestWithHeaders(url))
@@ -114,9 +119,7 @@ class FannieMaeLoanData(object):
         bar_to_use = NoopProgressBar
 
       with bar_to_use(content_length, 50, '#') as bar:
-        local_filename = path.join(self.dir, filename)
         decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
-        #with open(local_filename, 'wb') as f:
         f = NamedTemporaryFile(delete=False)
         chunk = r.read(4096)
         while chunk:
@@ -185,6 +188,10 @@ class FannieMaeLoanData(object):
       return True
 
     download_list = filter(lambda (filetype, year, quarter, link): is_needed(filetype, year, quarter), self.list_downloads(url))
+    self.download_list = download_list
+    map(lambda (filetype, year, quarter, link): self.download(link, show_progress), download_list)
+
+  def download_all_in_list(self, download_list, show_progress=False):
     map(lambda (filetype, year, quarter, link): self.download(link, show_progress), download_list)
 
 if __name__ == '__main__':
@@ -196,6 +203,7 @@ if __name__ == '__main__':
   parser.add_argument('--acq-only', help='only download acquisition file', action='store_true', default=False)
   parser.add_argument('--perf-only', help='only download performance file', action='store_true', default=False)
   parser.add_argument('-q', '--quarters', help='quarters to download', nargs='+', type=int, default=[1,2,3,4])
+  parser.add_argument('-r', '--retry', help='number of times to retry', type=int, default=0)
   args = parser.parse_args()
 
   logging.basicConfig(format='>>> [%(asctime)s] [%(levelname)s] %(message)s', level=logging.INFO)
@@ -208,12 +216,34 @@ if __name__ == '__main__':
     logging.error('You set both --acq-only and --perf-only. Which one do you really want? Acquisition or Performance?')
     exit(1)
 
-  try:
-    with FannieMaeLoanData(args.dir) as fm:
+  if args.retry < 0:
+    logging.error('Retry must be a non-negative number')
+    exit(1)
+
+  interval = 5
+  finished = False
+  fm = FannieMaeLoanData(args.dir)
+  fm.login()
+  for i in xrange(args.retry + 1):
+    try:
       millis = int(round(time() * 1000))
-      fm.download_all(DOWNLOADS_URL % (millis, millis), args.from_year, args.to_year, args.progress, args.acq_only, args.perf_only, args.quarters)
-  except Exception as e:
-    logging.error('Downloads aborted! %s', e)
-    raise e
-  else:
-    logging.info('All downloads finished. Bye bye bye...')
+      if i == 0:
+        fm.download_all(DOWNLOADS_URL % (millis, millis), args.from_year, args.to_year, args.progress, args.acq_only, args.perf_only, args.quarters)
+      else:
+        fm.download_all_in_list(fm.download_list, args.progress)
+      logging.info('All downloads finished. Bye bye bye...')
+      finished = True
+      break
+    except Exception as e:
+      logging.error('Downloads aborted! Error: %s', e)
+      logging.info('Retry attempt %s in %s seconds', i + 1, interval)
+      sleep(interval)
+      interval = interval * 2
+    except:
+      logging.error('Downloads interruptted!')
+      logging.info('Retry attempt %s in %s seconds', i + 1, interval)
+      sleep(interval)
+      interval = interval * 2
+
+  if not finished:
+    logging.error('Cannot finish downloads after %s retries :(')
