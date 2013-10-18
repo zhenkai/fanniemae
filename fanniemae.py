@@ -1,6 +1,8 @@
 from argparse import ArgumentParser
-from os import path
+from tempfile import NamedTemporaryFile
+from os import path, unlink
 from time import time, strftime
+import shutil
 import urllib2
 import json
 import logging
@@ -101,6 +103,7 @@ class FannieMaeLoanData(object):
     gz_filename = url.split('/')[-1]
     filename = '.'.join(gz_filename.split('.')[:-1])
     try:
+      r = None
       r = self.opener.open(getRequestWithHeaders(url))
       content_length = int(r.headers.get('content-length'))
       logging.info('Downloading %s (%0.2f MB) to %s' % (filename, content_length / (1024.0 * 1024.0), self.dir))
@@ -113,34 +116,29 @@ class FannieMaeLoanData(object):
       with bar_to_use(content_length, 50, '#') as bar:
         local_filename = path.join(self.dir, filename)
         decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
-        with open(local_filename, 'wb') as f:
+        #with open(local_filename, 'wb') as f:
+        f = NamedTemporaryFile(delete=False)
+        chunk = r.read(4096)
+        while chunk:
+          decompressed_chunk = decompressor.decompress(chunk)
+          f.write(decompressed_chunk)
+          bar.update(len(chunk))
           chunk = r.read(4096)
-          while chunk:
-            #f.write(chunk)
-            decompressed_chunk = decompressor.decompress(chunk)
-            f.write(decompressed_chunk)
-            bar.update(len(chunk))
-            chunk = r.read(4096)
+
+        f.close()
+        shutil.move(f.name, local_filename)
+
     except Exception as e:
       logging.error('Downloading %s failed with status: %s' % (filename, e))
       raise e
     else:
       logging.info('%s Downloaded' % filename)
-      #self.decompress(local_filename)
     finally:
-      r.close()
-
-  def decompress(self, filename):
-    basename = filename.split('.')[:-1]
-    txt_file = '.'.join(basename)
-    logging.info('Decompressing %s to %s', filename, txt_file)
-    with open(txt_file, 'w') as tf:
-      with gopen(filename, 'rb') as gf:
-        buffer = gf.read(4096)
-        while buffer:
-          tf.write(buffer)
-          buffer = gf.read(4096)
-    logging.info('Decompressing %s finished', filename)
+      if path.exists(f.name):
+        f.close()
+        unlink(f.name)
+      if r is not None:
+        r.close()
 
   def list_downloads(self, url):
     try:
