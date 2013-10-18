@@ -10,7 +10,7 @@ LOGIN_URL = 'https://loanperformancedata.fanniemae.com/lppub/loginForm.html'
 #DOWNLOAD_URL = 'https://loanperformancedata.fanniemae.com/lppub-docs/publish/%s_%sQ%s.txt.gz'
 DOWNLOADS_URL= 'https://loanperformancedata.fanniemae.com/lppub/getMonthlyDownloadJson.json?_=%s&_search=false&nd=%s&rows=20&page=1&sidx=&sord=asc'
 # input your proxy url, something like 'http://username:password@webproxy.bankofamerica.com:8080'
-PROXY_URL='http://122.227.164.124:8118'
+PROXY_URL=None
 START_YEAR = 1900
 END_YEAR = 2100
 
@@ -74,10 +74,13 @@ class FannieMaeLoanData(object):
   def __init__(self, directory, login_url=LOGIN_URL, proxy_url=PROXY_URL):
     self.login_url = login_url
     self.dir = directory
-    self.opener = urllib2.build_opener(
-                    urllib2.HTTPHandler(),
-                    urllib2.HTTPSHandler(),
-                    urllib2.ProxyHandler({'https': proxy_url}))
+    if proxy_url is None:
+      self.opener = urllib2.build_opener()
+    else:
+      self.opener = urllib2.build_opener(
+                      urllib2.HTTPHandler(),
+                      urllib2.HTTPSHandler(),
+                      urllib2.ProxyHandler({'https': proxy_url}))
 
   def __enter__(self):
     logging.info('Login...')
@@ -91,7 +94,7 @@ class FannieMaeLoanData(object):
     return self
 
   def __exit__(self, type, value, traceback):
-    logging.info('All downloads finished. Bye bye bye...')
+    pass
 
 
   def download(self, url, show_progress):
@@ -144,7 +147,9 @@ class FannieMaeLoanData(object):
     download_list = []
 
     def process_archive(archive):
-        download_list.append((int(archive[2]), archive[4] + '/publish/' + archive[3]))
+        filename = archive[3]
+        quarter = int(filename.split('.')[0][-1])
+        download_list.append((archive[0], int(archive[2]), quarter, archive[4] + '/publish/' + filename))
 
     def process_archives_of_quarter(archives_of_quarter):
       # filter out unavailable quaters first before processing
@@ -163,9 +168,21 @@ class FannieMaeLoanData(object):
 
     return download_list
 
-  def download_all(self, url, from_year, to_year, show_progress = False):
-    download_list = filter(lambda (year, link): year >= from_year and year <= to_year, self.list_downloads(url))
-    map(lambda (year, link): self.download(link, show_progress), download_list)
+  def download_all(self, url, from_year, to_year, show_progress = False, acq_only = False, perf_only = False, quarters = [1,2,3,4]):
+    def is_needed(filetype, year, quarter):
+      if year < from_year or year > to_year:
+        return False
+      if quarter not in quarters:
+        return False
+      if acq_only and filetype == 'Performance':
+        return False
+      if perf_only and filetype == 'Acquisitions':
+        return False
+
+      return True
+
+    download_list = filter(lambda (filetype, year, quarter, link): is_needed(filetype, year, quarter), self.list_downloads(url))
+    map(lambda (filetype, year, quarter, link): self.download(link, show_progress), download_list)
 
 if __name__ == '__main__':
   parser = ArgumentParser(description='FannieMae load data download hack')
@@ -173,6 +190,9 @@ if __name__ == '__main__':
   parser.add_argument('-f', '--from-year', help='from year', type=int, default=START_YEAR)
   parser.add_argument('-t', '--to-year', help='to year', type=int, default=END_YEAR)
   parser.add_argument('-p', '--progress', help='show progress bar', action='store_true', default=False)
+  parser.add_argument('--acq-only', help='only download acquisition file', action='store_true', default=False)
+  parser.add_argument('--perf-only', help='only download performance file', action='store_true', default=False)
+  parser.add_argument('-q', '--quarters', help='quarters to download', nargs='+', type=int, default=[1,2,3,4])
   args = parser.parse_args()
 
   logging.basicConfig(format='>>> [%(asctime)s] [%(levelname)s] %(message)s', level=logging.INFO)
@@ -181,6 +201,16 @@ if __name__ == '__main__':
     logging.error('%s is not a directory!' % args.dir)
     exit(1)
 
-  with FannieMaeLoanData(args.dir) as fm:
-    millis = int(round(time() * 1000))
-    fm.download_all(DOWNLOADS_URL % (millis, millis), args.from_year, args.to_year, args.progress)
+  if args.acq_only and args.perf_only:
+    logging.error('You set both --acq-only and --perf-only. Which one do you really want? Acquisition or Performance?')
+    exit(1)
+
+  try:
+    with FannieMaeLoanData(args.dir) as fm:
+      millis = int(round(time() * 1000))
+      fm.download_all(DOWNLOADS_URL % (millis, millis), args.from_year, args.to_year, args.progress, args.acq_only, args.perf_only, args.quarters)
+  except Exception as e:
+    logging.error('Downloads aborted! %s', e)
+    raise e
+  else:
+    logging.info('All downloads finished. Bye bye bye...')
