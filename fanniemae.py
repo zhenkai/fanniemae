@@ -1,10 +1,10 @@
-from gzip import open as gopen
 from argparse import ArgumentParser
 from os import path
 from time import time, strftime
 import urllib2
 import json
 import logging
+import zlib
 
 LOGIN_URL = 'https://loanperformancedata.fanniemae.com/lppub/loginForm.html'
 #DOWNLOAD_URL = 'https://loanperformancedata.fanniemae.com/lppub-docs/publish/%s_%sQ%s.txt.gz'
@@ -98,7 +98,8 @@ class FannieMaeLoanData(object):
 
 
   def download(self, url, show_progress):
-    filename = url.split('/')[-1]
+    gz_filename = url.split('/')[-1]
+    filename = '.'.join(gz_filename.split('.')[:-1])
     try:
       r = self.opener.open(getRequestWithHeaders(url))
       content_length = int(r.headers.get('content-length'))
@@ -111,17 +112,21 @@ class FannieMaeLoanData(object):
 
       with bar_to_use(content_length, 50, '#') as bar:
         local_filename = path.join(self.dir, filename)
+        decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
         with open(local_filename, 'wb') as f:
           chunk = r.read(4096)
           while chunk:
-            f.write(chunk)
+            #f.write(chunk)
+            decompressed_chunk = decompressor.decompress(chunk)
+            f.write(decompressed_chunk)
             bar.update(len(chunk))
             chunk = r.read(4096)
-    except urllib2.URLError as e:
-      logging.error('Downloading %s failed with status: %s' % (filename, e.code))
+    except Exception as e:
+      logging.error('Downloading %s failed with status: %s' % (filename, e))
+      raise e
     else:
       logging.info('%s Downloaded' % filename)
-      self.decompress(local_filename)
+      #self.decompress(local_filename)
     finally:
       r.close()
 
@@ -142,7 +147,7 @@ class FannieMaeLoanData(object):
       r = self.opener.open(getRequestWithHeaders(url))
       json_response = json.loads(r.read())
     except urllib2.URLError as e:
-      logging.error('Cannot list downloads: %s', e.code)
+      logging.error('Cannot list downloads: %s', e)
       return []
     download_list = []
 
